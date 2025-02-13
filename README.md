@@ -92,9 +92,14 @@ Developers can modify and extend the boilerplate to create their own privacy-pre
   3. Database and Storage: Customize how data is stored or integrated into external systems.
 
 - Steps to Customize:
+
   1. Modify the TLSNotary prover and verifier for new data sources. Can look at a few examples [here](https://github.com/ZKStats/tlsn/tree/mpspdz-compat/tlsn/examples), specifically to be compatible with end-to-end flow, pls follow the instruction [here](https://github.com/ZKStats/tlsn/tree/mpspdz-compat/tlsn/examples/binance)
   2. Update the MPC program to include additional or modified statistical operations. Use MPCStats library for statistical operations. Can see the example and instruction what/how to customize [here](https://github.com/ZKStats/MP-SPDZ/tree/mpcstats-lib/mpcstats)
-  3. Deploy and test the customized application locally before scaling to a remote setup.
+  3. Customize how data is stored [here](https://github.com/ZKStats/mpc-demo-infra/blob/e73b35aa487b8dc1efd403edddb80f10ebebf681/mpc_demo_infra/coordination_server/database.py#L31) by modifying class MPCSession (Line ), in this example we store eth_address and uid to make sure that same person (aka same binance uid) with corresponding eth_address wont submit multiple proofs.
+
+     Once modify database structure, we also need to modify its correspondong flow which is p obvious [here](https://github.com/ZKStats/mpc-demo-infra/blob/e73b35aa487b8dc1efd403edddb80f10ebebf681/mpc_demo_infra/coordination_server/routes.py#L142-L157) and [here](https://github.com/ZKStats/mpc-demo-infra/blob/e73b35aa487b8dc1efd403edddb80f10ebebf681/mpc_demo_infra/coordination_server/routes.py#L233-L250)
+
+  4. Deploy and test the customized application locally before scaling to a remote setup.
 
 ## 5. Technical Details
 
@@ -127,7 +132,127 @@ See [here](https://pse-team.notion.site/Choosing-a-Suitable-MPC-Protocol-fffd57e
 
 ### Comparison with Existing Works
 
-(To-be-completed)
+#### Framework we use ([ref](https://arxiv.org/pdf/2012.08347))
+
+Types of Data flow
+
+- Message flow: from one party to another
+- Service Provider flow: message flow + compute on the message during transit
+- Aggregation flow: get messages from multiple parties
+
+Problems with Data
+
+- Copy Problem: Once data is out, we lost control of it to the recipient.
+  - [here](https://www.youtube.com/watch?v=gbYXBJOFgeI) is philosophical debate if this problem should be solved or not…
+- Bundling Problem: Something cannot be trusted/verified without context of other relevant bits
+- Edit Problem: how to be sure that the entity storing data doesn’t edit it before transferring
+- Recursive Oversight Problem: who watches the watcher
+
+Framework itself
+
+- Input Privacy: Can process info hidden from you
+  - Make sure service providers process data without being able to see it or use it for other purposes outside of the governed info flow.
+  - Most tech we know: zkp, mpc, fhe, enclave, …
+- Output Privacy: Cannot reverse engineer input from output
+  - DP gives limit on the likelihood that can infer input, Especially for preventing linkability of data that is split by categorty: for example: if documents are grouped by authors employer, then stats are calculated across documents, DP can prevent one from knowing info specific to an employer.
+- Input Verification: Ensure that the info comes form you
+  - public key infra, digital signature, zkp (ability to verify the input to arbitrary computation)
+- Output Verification: Ensure the process of calculation is correct
+  - Without causing recursive oversight problem
+- Flow Governance: Who holds authority to modify the flow
+  - mostly MPC
+
+#### Actual comparison with existing works
+
+##### 1.[PySyft](https://github.com/OpenMined/PySyft): PET with [data science](https://ep2024.europython.eu/session/pysyft-data-science-on-data-you-are-not-allowed-to-see/)
+
+**Product**
+
+- **Target Users**: Remote Research! PySyft from Open Mined is non-profit foundation to build the public network for non-public information, mostly geared towards data scientists & researchers that want to operate a certain algorithm over private data.
+  - It connects objective-aligned researchers with data owners for research itself!
+  - Data Owner wants to collaborate and share their data for researchers in a private way.
+- **How to Use**:
+  - import syft as sy
+  - But can write everything as it Python, and just integrate with sy after each step.
+  - So users can toy with it as if its just Python.
+- Two sides: data provider and data consumer.
+  - Data provider can create corresponding mock data, create account for eligible researchers, then approve the algorithm.
+    - Datasites are servers for non-public data that maintain strict control over data access and use. Datasites can be deployed on local computers, in a cluster, or in the cloud. And for more stringent security, Datasites support air-gapped configuration to separate the prototyping environment from code execution.
+  - Data consumer can test their algorithm with mock data and request the computation result. All this can be done in Python!
+- **What calculations**: support only Python CPU, GPU.
+
+**Technology**
+
+- **Input Privacy**: Running locally or encrypted and transfer to use with enclaves (TEE, confidential container by Microsoft Azure and such as well)
+- **Output Privacy**: -
+- **Input Verification**: By partnering up with Syft! If using TEE, verify the match between in TEEE and the reference values in the stakeholder datasite itself. https://blog.openmined.org/secure-enclaves-for-ai-evaluation/
+- **Output Verification**: Secure enclaves with code attestation from a trusted third-party service (e.g. Microsoft Azure's Remote Attestation Service, NVIDIA Remote Attestation Service). [WIP]
+- **Flow Governance**: For multi-party: stakeholders within both firms. For single party, now p scary since we upload original dataset to datasite…..why?
+- **Number of Parties**: Mostly one, but if multiple, [still in experiment] will use secure enclave. Syft will orchestrate various approvals necessary from the organizations to allow your computation.
+
+##### 2.[Rosetta](https://github.com/LatticeX-Foundation/Rosetta)
+
+**Product**
+
+- **Target Users**: By https://latticex.foundation/ to develop a large-scale distributed interoperable computational network that supports the expansive economy activities and broader business applications.
+  - Accelerator, Research Pioneer, Facilitator
+- **How to Use**:
+  `import latticex.rosetta as rtt` - Then write tensorflow with it! —> interface is not really that easy, more like mp-spdz
+- **What calculations**: Anything written in Tensorflow
+
+**Technology**
+
+- **Input Privacy**: MPC for 3 parties using SecureNN and Helix (both semi-honest model with honest majority)
+- **Output Privacy**: -
+- **Input Verification:** [-](https://blog.openmined.org/secure-enclaves-for-ai-evaluation/)
+- **Output Verification**: Mystique, zkp for secure inference of AI
+- **Flow Governance**: by design
+- **Number of Parties**: 3
+
+##### 3. Secretflow (Unified framework for privacy-preserving ml & data analysis)
+
+**Product**
+
+- **Target Users**: Try to be one-stop-shop for developers in privacy preserving tech: from poc to production-ready. Claim to be modular enought to support most PETs, and ML framework including PyTorch & JAX
+  - Specifically SPU is Domain-specific compiler and runtime suite for ML
+- **How to Use**: import spu.utils.distributed as ppd,
+  - and then can just write JAX
+  - Very nice abstraction of multiparty-computation.
+- **What calculations**: All that ML framework supported
+
+**Technology (SPU itself)**
+
+Ironically, not see much on how they bring every tech together or allow for modularity as they claim in website.
+
+- **Input Privacy**: MPC
+- **Output Privacy**: -
+- **Input Verification**: -
+- **Output Verification**: -
+- **Flow Governance**: by design
+- **Number of Parties**: multiple
+- **Paper**: [SPU Paper](https://www.usenix.org/system/files/atc23-ma.pdf).
+- **Integration**: Mikerah suggests that if we could translate torch to PPHLO, we could support torch code in MP-SPDZ DSL, with the flow: torch → PPHLO → MP-SPDZ DSL.
+
+##### 4. [Nillion](https://docs.nillion.com/)
+
+**Product**
+
+- **Target Users**: Developer building application at intersection of Blockchain <> Data (mostly AI)
+- **How to Use**:
+  - Need to write program using Nada Language, and deploy it similar to other blockchains.
+- **What calculations**: Anything written in their own language (Nada)
+
+**Technology**
+
+- **Input Privacy**: MPC: use 2 phases: interactive pre-processing phase (not depend on input) and non-interactive computing phase
+- **Output Privacy**: Just by MPC, not seeing DP yet
+- **Input Verification**: Similar to blockchain, so yes tied to your Nillion wallet address
+- **Output Verification**: Yes, its on network itself
+- **Flow Governance**: by design
+- **Number of Parties**: multiple
+- **Paper**: https://nillion.pub/sum-of-products-lsss-non-interactive.pdf
+- Note: This is not the same as client interface! Because this still requires all computation parties to be online at the same time in pre-processing phase. And in this example, there is no concept of client, since the party is involved in MPC operation itself. However, we can literally integrate client interface with this protocol.
+- Note2: Information-theoretic security is a bit different than typical encryption, because it has no adversarial computational assumption. However, this is all still be pointless if some threshold of parties are corrupted (based on mpc security) similar to all MPCs anyway.
 
 ## 6. Potential Enhancements
 
